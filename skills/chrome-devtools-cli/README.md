@@ -26,6 +26,89 @@
 - [scripts/lib/session-manager.mjs](scripts/lib/session-manager.mjs)：核心流程编排与 transport 选择逻辑。
 - [tests/](tests/)：针对会话发现、命令拼接、profile 同步等行为的回归测试。
 
+## 脚本文件详解
+
+### 入口脚本
+
+#### [scripts/ensure-browser-session.mjs](scripts/ensure-browser-session.mjs)
+
+会话建立入口脚本。调用 `session-manager.mjs` 中的 `ensureBrowserSession()`，通过环境变量 `CHROME_DEVTOOLS_CLI_CHANNEL` 指定 Chrome 渠道（默认 `stable`），成功后以 JSON 格式输出会话信息，失败则输出错误并以非零退出码退出。
+
+#### [scripts/stop-cli-session.mjs](scripts/stop-cli-session.mjs)
+
+会话清理入口脚本。通过 `resolveChromeDevtoolsCliRunner()` 查找本地 CLI（禁止自动安装），执行 `stopCli()` 停止 CLI 守护进程。对于"未运行""无守护进程"等非致命错误会静默忽略，不会关闭浏览器窗口。
+
+### 核心模块（scripts/lib/）
+
+#### [scripts/lib/session-manager.mjs](scripts/lib/session-manager.mjs)
+
+**整个 skill 的核心编排模块**，包含以下主要功能：
+
+- **CLI 运行器解析**（`resolveChromeDevtoolsCliRunner`）：按优先级查找可用的 CLI——本地已安装 → 自动全局安装 → npx 临时运行。
+- **本地 CLI 发现**（`findLocalChromeDevtoolsCli`）：遍历系统 PATH，查找 `chrome-devtools` 或 `chrome-devtools-mcp` 可执行文件，Windows 下兼容 PATHEXT 扩展名。
+- **CLI 能力探测**（`learnHelpCommandsWithRunner`）：通过 `--help` 输出实时检测 CLI 是否支持 `--browserUrl`、`--wsEndpoint`、`--autoConnect` 等参数。
+- **浏览器实例发现**（`tryResolveLiveBrowserFromUserDataDir`）：从 DevToolsActivePort 文件中读取调试端口信息，通过 HTTP 探测或 WebSocket 直连确认浏览器是否可复用。
+- **会话建立主流程**（`ensureBrowserSession`）：按 `autoConnect → 复用真实 Chrome → 复用备用 profile → 启动新 Chrome` 的优先级建立浏览器会话。
+- **两种运行器实现**：`createLocalCliRunner`（直接调用本地 CLI 命令）和 `createNpxCliRunner`（通过 npx 临时下载运行），统一接口便于无缝切换。
+
+#### [scripts/lib/chrome-process.mjs](scripts/lib/chrome-process.mjs)
+
+Chrome 进程管理模块，负责浏览器的启动与就绪检测：
+
+- **`findExistingPath`**：从候选路径列表中查找第一个存在的 Chrome 可执行文件。
+- **`findFreePort`**：通过创建临时 TCP 服务器让系统自动分配空闲端口，然后立即关闭服务器以释放该端口。
+- **`launchChromeDetached`**：以 detached（独立）模式启动 Chrome 进程，传入 `--remote-debugging-port`、`--user-data-dir` 等参数，使浏览器在父进程退出后继续运行。
+- **`waitForDevToolsActivePort`**：每 250ms 轮询等待 DevToolsActivePort 文件出现（默认超时 15 秒）。
+- **`waitForBrowserReady`**：先等待 DevToolsActivePort 文件写入完成，再通过 HTTP 探测确认调试端口可正常访问。
+
+#### [scripts/lib/platform-paths.mjs](scripts/lib/platform-paths.mjs)
+
+跨平台路径解析模块，根据操作系统和 Chrome 渠道返回对应路径：
+
+- **`normalizeChannel`**：规范化渠道名称（stable/beta/dev/canary）并校验。
+- **`getFallbackProfileDir`**：返回 CLI 使用的备用配置文件目录（`~/.cache/chrome-devtools-mcp-cli/` 下）。
+- **`getRealUserDataDir`**：返回 Chrome 真实用户数据目录路径（Windows: `%LOCALAPPDATA%\Google\Chrome\User Data`；macOS: `~/Library/Application Support/Google/Chrome`；Linux: `~/.config/google-chrome`）。
+- **`getChromeExecutableCandidates`**：返回 Chrome 可执行文件的候选路径列表，覆盖 Windows（Program Files）、macOS（/Applications）和 Linux（/usr/bin）三个平台。
+
+#### [scripts/lib/devtools-active-port.mjs](scripts/lib/devtools-active-port.mjs)
+
+DevToolsActivePort 文件解析模块：
+
+- **`parseDevToolsActivePort`**：解析文件内容（第一行为端口号，第二行为 WebSocket 路径），构造 HTTP 调试地址和 WebSocket 调试地址。
+- **`readDevToolsActivePort`**：从 Chrome 用户数据目录中读取 DevToolsActivePort 文件并调用 `parseDevToolsActivePort` 解析。
+
+#### [scripts/lib/http-probe.mjs](scripts/lib/http-probe.mjs)
+
+浏览器调试端口 HTTP 探测模块：
+
+- **`probeBrowserUrl`**：通过 HTTP GET 请求 `/json/version` 端点，验证浏览器调试端口是否可用，并从响应中提取 `webSocketDebuggerUrl`（WebSocket 调试地址）和浏览器版本信息。支持超时控制（默认 1500ms）。
+
+#### [scripts/lib/profile-sync.mjs](scripts/lib/profile-sync.mjs)
+
+Chrome 配置文件目录同步模块：
+
+- **`shouldCopyProfilePath`**：判断某个文件/目录是否应被复制，自动排除 DevToolsActivePort、Singleton 锁文件以及 Cache 等缓存目录。
+- **`copyDirectory`**：递归复制目录，跳过不需要的运行时锁文件和缓存目录。
+- **`syncProfileCopy`**：将真实用户数据目录同步到备用配置文件目录，用于在不锁定真实 profile 的情况下启动独立 Chrome 实例。同步失败时返回错误信息而不抛出异常。
+- **`clearProfileCopy`**：清除备用配置文件目录。
+
+#### [scripts/lib/node-version.mjs](scripts/lib/node-version.mjs)
+
+Node.js 版本校验模块：
+
+- **`parseNodeVersion`**：将版本号字符串（如 `v22.12.0`）解析为 `{ major, minor, patch }` 结构。
+- **`isSupportedNodeVersion`**：判断版本是否在支持范围内（`^20.19.0 || ^22.12.0 || >=23`）。
+- **`assertSupportedNodeVersion`**：断言当前 Node.js 版本满足最低要求，不满足则抛出带清晰提示的错误。
+
+#### [scripts/lib/npx-command.mjs](scripts/lib/npx-command.mjs)
+
+Shell 命令构建模块：
+
+- **`quoteShellArg`**：对单个 shell 参数进行转义，同时兼容 Windows（cmd 双引号）和 Unix（bash 单引号）两种平台的规则。
+- **`buildCliCommand`**：将命令和参数列表拼接为完整的 shell 命令字符串，自动对每个参数进行平台适配的转义。
+- **`buildNpxCommand`**：构造 npx 命令字符串，支持自定义 `--registry` 参数。
+- **`formatCommandFailure`**：格式化命令执行失败的错误信息，优先展示 stderr，其次 stdout，最后错误消息。
+
 ## 当前实现的完整流程
 
 ### 1. 入口
