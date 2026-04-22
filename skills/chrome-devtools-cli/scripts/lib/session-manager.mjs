@@ -27,6 +27,8 @@ import {
 const execAsync = promisify(exec);
 const DEFAULT_NPM_REGISTRY =
   process.env.CHROME_DEVTOOLS_CLI_NPM_REGISTRY ?? 'https://registry.npmmirror.com/';
+const DEFAULT_CLI_PACKAGE_SPEC = 'chrome-devtools-mcp@latest';
+const DISABLE_AUTO_INSTALL_ENV_VAR = 'CHROME_DEVTOOLS_CLI_DISABLE_AUTO_INSTALL';
 const LOCAL_CLI_NAMES = ['chrome-devtools', 'chrome-devtools-mcp'];
 
 function createExecOptions() {
@@ -86,6 +88,30 @@ async function defaultEnsureNpxAvailable({
   execCommand = defaultExecCommand,
 } = {}) {
   await execCommand(buildNpxCommand(['--version']));
+}
+
+function isTruthyEnvValue(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+async function defaultInstallChromeDevtoolsCli({
+  execCommand = defaultExecCommand,
+  registry = DEFAULT_NPM_REGISTRY,
+  packageSpec = DEFAULT_CLI_PACKAGE_SPEC,
+} = {}) {
+  const args = ['install', '-g', packageSpec];
+
+  if (registry) {
+    args.push(`--registry=${registry}`);
+  }
+
+  const command = buildCliCommand('npm', args);
+
+  try {
+    return await execCommand(command);
+  } catch (error) {
+    throw new Error(formatCommandFailure(command, error));
+  }
 }
 
 function createLocalCliRunner(
@@ -197,6 +223,35 @@ function createNpxCliRunner({
   };
 }
 
+async function tryResolveLocalCliRunner(
+  cliCommand,
+  {
+    execCommand = defaultExecCommand,
+  } = {},
+) {
+  if (!cliCommand) {
+    return null;
+  }
+
+  const localRunner = createLocalCliRunner(cliCommand, {
+    execCommand,
+  });
+
+  try {
+    const helpInfo = await learnHelpCommandsWithRunner(localRunner);
+    if (!isCliCapableHelpInfo(helpInfo)) {
+      return null;
+    }
+
+    return {
+      ...localRunner,
+      helpInfo,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function learnHelpCommandsWithRunner(runner) {
   const rootPackageHelp = getCommandOutput(await runner.runRootHelp());
   const cliHelp = getCommandOutput(await runner.runCliHelp());
@@ -289,6 +344,8 @@ export async function resolveChromeDevtoolsCliRunner(
   {
     localCliCommand = process.env.CHROME_DEVTOOLS_CLI_COMMAND,
     npmRegistry = DEFAULT_NPM_REGISTRY,
+    allowAutoInstall = !isTruthyEnvValue(process.env[DISABLE_AUTO_INSTALL_ENV_VAR]),
+    packageSpec = DEFAULT_CLI_PACKAGE_SPEC,
   } = {},
   deps = {},
 ) {
@@ -296,29 +353,46 @@ export async function resolveChromeDevtoolsCliRunner(
   const ensureNpxAvailable =
     deps.ensureNpxAvailable ??
     (async () => await defaultEnsureNpxAvailable({ execCommand }));
+  const installChromeDevtoolsCli =
+    deps.installChromeDevtoolsCli ??
+    (async options => await defaultInstallChromeDevtoolsCli({
+      execCommand,
+      registry: npmRegistry,
+      packageSpec,
+      ...options,
+    }));
   const findLocalCli =
     deps.findLocalChromeDevtoolsCli ?? findLocalChromeDevtoolsCli;
 
+  const hasExplicitLocalCliCommand = Boolean(localCliCommand);
   const resolvedLocalCliCommand =
     localCliCommand ?? (await findLocalCli());
+  const localRunner = await tryResolveLocalCliRunner(resolvedLocalCliCommand, {
+    execCommand,
+  });
 
-  if (resolvedLocalCliCommand) {
-    const localRunner = createLocalCliRunner(resolvedLocalCliCommand, {
+  if (localRunner) {
+    return localRunner;
+  }
+
+  if (allowAutoInstall && !hasExplicitLocalCliCommand) {
+    try {
+      await installChromeDevtoolsCli({
+        execCommand,
+        registry: npmRegistry,
+        packageSpec,
+      });
+    } catch {
+      // Fall through to npx when installation fails.
+    }
+
+    const installedLocalCliCommand = await findLocalCli();
+    const installedLocalRunner = await tryResolveLocalCliRunner(installedLocalCliCommand, {
       execCommand,
     });
 
-    try {
-      const helpInfo = await learnHelpCommandsWithRunner(localRunner);
-      if (!isCliCapableHelpInfo(helpInfo)) {
-        throw new Error('Local command does not expose chrome-devtools start/stop CLI semantics');
-      }
-
-      return {
-        ...localRunner,
-        helpInfo,
-      };
-    } catch {
-      // Fall through to npx when the local command does not expose start/stop CLI semantics.
+    if (installedLocalRunner) {
+      return installedLocalRunner;
     }
   }
 

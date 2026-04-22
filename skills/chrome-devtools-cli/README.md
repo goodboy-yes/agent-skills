@@ -38,7 +38,7 @@ node skills/chrome-devtools-cli/scripts/ensure-browser-session.mjs
 
 这个脚本会调用 [scripts/lib/session-manager.mjs](scripts/lib/session-manager.mjs) 中的 `ensureBrowserSession()`，返回本次会话是如何建立或复用的。
 
-### 2. 先决定用本地 CLI 还是 `npx`
+### 2. 先决定用本地 CLI、自动安装 CLI，还是 `npx`
 
 当前实现会先尝试在本机 `PATH` 中查找真正可用的 CLI：
 
@@ -46,7 +46,15 @@ node skills/chrome-devtools-cli/scripts/ensure-browser-session.mjs
 - 其次找 `chrome-devtools-mcp`
 - 如果本地命令只是包根命令、并不具备 `chrome-devtools start/stop` 语义，就不直接采用
 
-如果本地没有合适 CLI，就退回到：
+如果本地没有合适 CLI，默认会先执行官方推荐的全局安装：
+
+```bash
+npm install -g chrome-devtools-mcp@latest --registry=https://registry.npmmirror.com/
+```
+
+安装完成后会重新探测本机 CLI。
+
+如果自动安装失败，或者你显式禁用了自动安装，才退回到：
 
 ```bash
 npx --registry=https://registry.npmmirror.com/ -y -p chrome-devtools-mcp@latest chrome-devtools ...
@@ -56,17 +64,26 @@ npx --registry=https://registry.npmmirror.com/ -y -p chrome-devtools-mcp@latest 
 
 - 优先与使用者真实环境保持一致。
 - 本地有可用 CLI 时，不依赖外部 registry。
-- 没有本地 CLI 时，仍然能自动补齐运行能力。
+- 本地缺少 CLI 时，优先对齐官方 `cli.md` 推荐的安装方式。
+- 自动安装失败时，仍然能通过 `npx` 自动补齐运行能力。
+
+如果你需要禁用自动安装，可以在运行前设置：
+
+```powershell
+$env:CHROME_DEVTOOLS_CLI_DISABLE_AUTO_INSTALL = "1"
+```
 
 ### 3. 先读实时帮助，再决定 transport
 
 当前实现不会凭记忆假设参数，而是先读取：
 
 ```bash
-npx -y chrome-devtools-mcp@latest --help
-npx -y -p chrome-devtools-mcp@latest chrome-devtools --help
-npx -y -p chrome-devtools-mcp@latest chrome-devtools start --help
+chrome-devtools-mcp --help
+chrome-devtools --help
+chrome-devtools start --help
 ```
+
+如果本机 CLI 还不存在，才改用 `npx` 版帮助输出做能力核查。
 
 然后根据帮助信息决定本次能走哪些 transport。
 
@@ -210,7 +227,9 @@ Chrome 官方博客明确说明：
 综合代码实现、实际帮助输出和官方文档，当前 skill 的设计结论可以总结为：
 
 - 优先复用真实 Chrome 会话，而不是默认新开一个干净浏览器。
-- 如果本机已安装可用 CLI，优先使用本机 CLI；否则使用 `npx` 自动补齐。
+- 如果本机已安装可用 CLI，优先使用本机 CLI。
+- 如果本机缺少可用 CLI，默认自动安装官方推荐的 `chrome-devtools-mcp@latest` 全局 CLI。
+- 只有自动安装失败，或者显式禁用了自动安装时，才退回到 `npx`。
 - 对实时会话的复用，优先尝试 `browserUrl`。
 - 当 live session 只有 `DevToolsActivePort`，但 `/json/version` 不可用时，改走 `wsEndpoint`。
 - 固定回退 profile 是最后一道兜底，而不是默认工作模式。

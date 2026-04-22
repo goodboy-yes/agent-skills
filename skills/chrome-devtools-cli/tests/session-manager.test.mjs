@@ -47,18 +47,79 @@ Start or restart chrome-devtools-mcp`;
   ]);
 });
 
-test('resolveChromeDevtoolsCliRunner falls back to npx with registry override when local CLI is missing', async () => {
+test('resolveChromeDevtoolsCliRunner auto-installs latest CLI and retries local resolution when discovered local command is not usable', async () => {
   const commands = [];
+  let phase = 'before-install';
+  const rootHelp = `Options:
+      --autoConnect  [boolean]
+      --help         Show help  [boolean]`;
+  const cliHelp = `chrome-devtools <command> [...args] --flags
+
+Commands:
+  chrome-devtools start  Start or restart chrome-devtools-mcp
+  chrome-devtools stop   Stop chrome-devtools-mcp if any`;
+  const startHelp = `chrome-devtools start
+
+Start or restart chrome-devtools-mcp`;
 
   const runner = await resolveChromeDevtoolsCliRunner(
     {
       npmRegistry: 'https://registry.npmmirror.com/',
     },
     {
+      findLocalChromeDevtoolsCli: async () =>
+        phase === 'before-install' ? 'chrome-devtools-mcp' : 'chrome-devtools',
+      execCommand: async command => {
+        commands.push(command);
+
+        if (command.startsWith('chrome-devtools-mcp')) {
+          return { stdout: rootHelp, stderr: '' };
+        }
+
+        if (command === 'chrome-devtools start --help') {
+          return { stdout: startHelp, stderr: '' };
+        }
+
+        return { stdout: cliHelp, stderr: '' };
+      },
+      installChromeDevtoolsCli: async ({ registry, packageSpec }) => {
+        assert.equal(registry, 'https://registry.npmmirror.com/');
+        assert.equal(packageSpec, 'chrome-devtools-mcp@latest');
+        phase = 'after-install';
+      },
+      ensureNpxAvailable: async () => {
+        throw new Error('npx should not be checked when install succeeds');
+      },
+    },
+  );
+
+  assert.equal(runner.kind, 'local');
+  assert.deepEqual(commands, [
+    'chrome-devtools-mcp --help',
+    'chrome-devtools-mcp --help',
+    'chrome-devtools-mcp start --help',
+    'chrome-devtools --help',
+    'chrome-devtools --help',
+    'chrome-devtools start --help',
+  ]);
+});
+
+test('resolveChromeDevtoolsCliRunner falls back to npx with registry override when auto-install is disabled and local CLI is missing', async () => {
+  const commands = [];
+
+  const runner = await resolveChromeDevtoolsCliRunner(
+    {
+      npmRegistry: 'https://registry.npmmirror.com/',
+      allowAutoInstall: false,
+    },
+    {
       findLocalChromeDevtoolsCli: async () => null,
       execCommand: async command => {
         commands.push(command);
         return { stdout: 'ok', stderr: '' };
+      },
+      installChromeDevtoolsCli: async () => {
+        throw new Error('auto-install should be disabled');
       },
     },
   );
@@ -76,12 +137,17 @@ test('resolveChromeDevtoolsCliRunner uses npmmirror as the default npx registry'
   const commands = [];
 
   const runner = await resolveChromeDevtoolsCliRunner(
-    {},
+    {
+      allowAutoInstall: false,
+    },
     {
       findLocalChromeDevtoolsCli: async () => null,
       execCommand: async command => {
         commands.push(command);
         return { stdout: 'ok', stderr: '' };
+      },
+      installChromeDevtoolsCli: async () => {
+        throw new Error('auto-install should be disabled');
       },
     },
   );
@@ -101,6 +167,7 @@ test('resolveChromeDevtoolsCliRunner falls back to npx when local CLI cannot use
   const runner = await resolveChromeDevtoolsCliRunner(
     {
       npmRegistry: 'https://registry.npmmirror.com/',
+      allowAutoInstall: false,
     },
     {
       findLocalChromeDevtoolsCli: async () => 'chrome-devtools-mcp',
@@ -112,6 +179,9 @@ test('resolveChromeDevtoolsCliRunner falls back to npx when local CLI cannot use
         }
 
         return { stdout: 'ok', stderr: '' };
+      },
+      installChromeDevtoolsCli: async () => {
+        throw new Error('auto-install should be disabled');
       },
     },
   );
@@ -137,6 +207,7 @@ test('resolveChromeDevtoolsCliRunner falls back to npx when local command only p
   const runner = await resolveChromeDevtoolsCliRunner(
     {
       npmRegistry: 'https://registry.npmmirror.com/',
+      allowAutoInstall: false,
     },
     {
       findLocalChromeDevtoolsCli: async () => 'chrome-devtools-mcp',
@@ -149,6 +220,9 @@ test('resolveChromeDevtoolsCliRunner falls back to npx when local command only p
 
         return { stdout: 'ok', stderr: '' };
       },
+      installChromeDevtoolsCli: async () => {
+        throw new Error('auto-install should be disabled');
+      },
     },
   );
 
@@ -157,6 +231,37 @@ test('resolveChromeDevtoolsCliRunner falls back to npx when local command only p
     'chrome-devtools-mcp --help',
     'chrome-devtools-mcp --help',
     'chrome-devtools-mcp start --help',
+    'npx --version',
+    'npx --registry=https://registry.npmmirror.com/ -y chrome-devtools-mcp@latest --help',
+    'npx --registry=https://registry.npmmirror.com/ -y -p chrome-devtools-mcp@latest chrome-devtools --help',
+    'npx --registry=https://registry.npmmirror.com/ -y -p chrome-devtools-mcp@latest chrome-devtools start --help',
+  ]);
+});
+
+test('resolveChromeDevtoolsCliRunner falls back to npx when auto-install fails', async () => {
+  const commands = [];
+  let installCalls = 0;
+
+  const runner = await resolveChromeDevtoolsCliRunner(
+    {
+      npmRegistry: 'https://registry.npmmirror.com/',
+    },
+    {
+      findLocalChromeDevtoolsCli: async () => null,
+      execCommand: async command => {
+        commands.push(command);
+        return { stdout: 'ok', stderr: '' };
+      },
+      installChromeDevtoolsCli: async () => {
+        installCalls += 1;
+        throw new Error('global install failed');
+      },
+    },
+  );
+
+  assert.equal(installCalls, 1);
+  assert.equal(runner.kind, 'npx');
+  assert.deepEqual(commands, [
     'npx --version',
     'npx --registry=https://registry.npmmirror.com/ -y chrome-devtools-mcp@latest --help',
     'npx --registry=https://registry.npmmirror.com/ -y -p chrome-devtools-mcp@latest chrome-devtools --help',

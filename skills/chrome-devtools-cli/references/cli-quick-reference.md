@@ -3,9 +3,23 @@
 ## 先查看当前 CLI 能力
 
 ```bash
+chrome-devtools-mcp --help
+chrome-devtools --help
+chrome-devtools <command> --help
+```
+
+如果本机还没有可用 CLI，再改用：
+
+```bash
 npx -y chrome-devtools-mcp@latest --help
 npx -y -p chrome-devtools-mcp@latest chrome-devtools --help
 npx -y -p chrome-devtools-mcp@latest chrome-devtools <command> --help
+```
+
+如果需要禁止自动全局安装，只在当前 PowerShell 窗口里临时设置：
+
+```powershell
+$env:CHROME_DEVTOOLS_CLI_DISABLE_AUTO_INSTALL = "1"
 ```
 
 重点看三种 transport：
@@ -24,6 +38,7 @@ node skills/chrome-devtools-cli/scripts/stop-cli-session.mjs
 
 ## 使用边界
 
+- 主路径是“本机 CLI -> 自动安装 latest CLI -> npx fallback”。
 - 优先复用已经运行中的真实 Chrome。
 - 如果 live Chrome 暴露 `/json/version`，优先走 `--browserUrl`。
 - 如果 live Chrome 只提供 `DevToolsActivePort`，且 `chrome-devtools start` 支持 `--wsEndpoint`，则走 `--wsEndpoint` 直连。

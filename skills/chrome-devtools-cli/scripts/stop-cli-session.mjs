@@ -7,7 +7,9 @@ function canIgnoreStopError(error) {
 }
 
 try {
-  const cliRunner = await resolveChromeDevtoolsCliRunner();
+  const cliRunner = await resolveChromeDevtoolsCliRunner({
+    allowAutoInstall: false,
+  });
   await cliRunner.stopCli();
 } catch (error) {
   if (!canIgnoreStopError(error)) {

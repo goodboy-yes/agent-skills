@@ -1,6 +1,6 @@
 ---
 name: chrome-devtools-cli
-description: Use when 需要真实 Chrome 浏览器来排查页面问题、执行登录流程、检查 DOM 或 console、操作真实站点、截图、调试样式、分析性能，或完成其他浏览器驱动的工作流，并且不希望让用户手动配置 MCP。
+description: Use when 需要真实 Chrome 浏览器来排查页面问题、执行登录流程、检查 DOM 或 console、操作真实站点、截图、调试样式、分析性能，或完成其他浏览器驱动的工作流。
 ---
 
 # Chrome DevTools CLI
@@ -19,10 +19,12 @@ node skills/chrome-devtools-cli/scripts/ensure-browser-session.mjs
 3. 在执行任何 CLI 命令前，先读取当前环境里的实时帮助：
 
 ```bash
-npx -y chrome-devtools-mcp@latest --help
-npx -y -p chrome-devtools-mcp@latest chrome-devtools --help
-npx -y -p chrome-devtools-mcp@latest chrome-devtools <command> --help
+chrome-devtools-mcp --help
+chrome-devtools --help
+chrome-devtools <command> --help
 ```
+
+如果当前机器还没有安装好本地 CLI，再退回到 `npx` 版本的帮助输出。
 
 4. 使用 Chrome DevTools CLI 完成实际的浏览器任务。
 5. 任务结束后，只停止 CLI daemon：
@@ -34,6 +36,8 @@ node skills/chrome-devtools-cli/scripts/stop-cli-session.mjs
 ## 使用规则
 
 - 不要凭记忆假设 CLI 参数，必须以当前环境中的 `--help` 输出为准。
+- 优先使用本机已有可用 CLI；如果没有，默认会自动安装官方推荐的 `chrome-devtools-mcp@latest` 全局 CLI。
+- 如果需要跳过自动安装，可在运行前设置 `CHROME_DEVTOOLS_CLI_DISABLE_AUTO_INSTALL=1`。
 - `DevToolsActivePort` 优先用于发现 live session。
 - 如果 `chrome-devtools start --help` 支持 `--wsEndpoint`，而 `/json/version` 又不可用，允许直接复用 `DevToolsActivePort` 中的 WebSocket 端点。
 - 优先复用已经运行中的 Chrome 会话。
