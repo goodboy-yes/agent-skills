@@ -343,3 +343,18 @@ Chrome 官方博客明确说明：
   https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session
 - Changes to remote debugging switches to improve security  
   https://developer.chrome.com/blog/remote-debugging-port
+
+## 现状
+
+- Chrome DevTools 文档明确写了可以 “Run another Chrome instance with the --remote-debugging-port=PORT parameter”，也就是“运行另一个 Chrome 实例”。
+  来源: https://developer.chrome.com/docs/devtools/remote-debugging/local-server/
+- Chrome 官方在 2025 年 3 月 17 日宣布，从 Chrome 136 开始，--remote-debugging-port 和 --remote-debugging-pipe 对默认数据目录不再生效，必须配合非默认的 --user-data-dir。
+  来源: https://developer.chrome.com/blog/remote-debugging-port
+
+- Chrome DevTools MCP 官方 README 也写了两条连接方式：
+  用 --browser-url 连接一个带远程调试端口的 Chrome
+  用 --autoConnect 连接当前正在运行的 Chrome
+  来源: https://github.com/ChromeDevTools/chrome-devtools-mcp
+
+- Chrome for Developers 在 2025 年 12 月的文章里明确说，Chrome 144+ 支持直接连接 active browser sessions，也就是复用当前浏览器会话。
+  来源: https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session

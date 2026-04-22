@@ -350,8 +350,6 @@ test('reuses a running real Chrome first', async () => {
     { channel: 'stable' },
     {
       processVersion: 'v22.12.0',
-      ensureNpxAvailable: async () => {},
-      learnHelpCommands: async () => {},
       realUserDataDir: '/real-profile',
       fallbackUserDataDir: '/fallback-profile',
       tryResolveLiveBrowser: async userDataDir =>
@@ -369,9 +367,15 @@ test('reuses a running real Chrome first', async () => {
       waitForBrowserReady: async () => {
         throw new Error('fallback readiness should not be awaited');
       },
-      startCli: async browserUrl => {
-        execCalls.push(browserUrl);
-      },
+      resolveChromeDevtoolsCliRunner: async () => ({
+        helpInfo: { startHelp: '' },
+        startCli: async browserUrl => {
+          execCalls.push(browserUrl);
+          return { stdout: '', stderr: '' };
+        },
+        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
+        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
+      }),
     },
   );
 
@@ -384,8 +388,6 @@ test('reuses an existing fallback Chrome before launching a new one', async () =
     { channel: 'stable' },
     {
       processVersion: 'v22.12.0',
-      ensureNpxAvailable: async () => {},
-      learnHelpCommands: async () => {},
       realUserDataDir: '/real-profile',
       fallbackUserDataDir: '/fallback-profile',
       tryResolveLiveBrowser: async userDataDir =>
@@ -401,12 +403,60 @@ test('reuses an existing fallback Chrome before launching a new one', async () =
       waitForBrowserReady: async () => {
         throw new Error('fallback readiness should not be awaited');
       },
-      startCli: async () => {},
+      resolveChromeDevtoolsCliRunner: async () => ({
+        helpInfo: { startHelp: '' },
+        startCli: async () => ({ stdout: '', stderr: '' }),
+        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
+        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
+      }),
     },
   );
 
   assert.equal(result.mode, 'reuse-fallback');
   assert.equal(result.browserUrl, 'http://127.0.0.1:9444');
+});
+
+test('passes launched browserUrl to waitForBrowserReady when launching fallback Chrome', async () => {
+  let waitCall;
+
+  const result = await ensureBrowserSession(
+    { channel: 'stable' },
+    {
+      processVersion: 'v22.12.0',
+      realUserDataDir: '/real-profile',
+      fallbackUserDataDir: '/fallback-profile',
+      tryResolveLiveBrowser: async () => null,
+      syncProfileCopy: async () => ({ ok: true }),
+      findChromeExecutable: async () => '/path/to/chrome',
+      findFreePort: async () => 9555,
+      launchChromeDetached: async () => {},
+      waitForBrowserReady: async (userDataDir, timeoutMs, options) => {
+        waitCall = { userDataDir, timeoutMs, options };
+        assert.equal(userDataDir, '/fallback-profile');
+        assert.equal(options?.browserUrl, 'http://127.0.0.1:9555');
+
+        return {
+          browserUrl: options.browserUrl,
+        };
+      },
+      resolveChromeDevtoolsCliRunner: async () => ({
+        helpInfo: { startHelp: '' },
+        startCli: async () => ({ stdout: '', stderr: '' }),
+        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
+        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
+      }),
+    },
+  );
+
+  assert.deepEqual(waitCall, {
+    userDataDir: '/fallback-profile',
+    timeoutMs: undefined,
+    options: {
+      browserUrl: 'http://127.0.0.1:9555',
+    },
+  });
+  assert.equal(result.mode, 'launched-fallback');
+  assert.equal(result.browserUrl, 'http://127.0.0.1:9555');
 });
 
 test('launches fallback Chrome even when profile sync fails', async () => {
@@ -415,8 +465,6 @@ test('launches fallback Chrome even when profile sync fails', async () => {
     { channel: 'stable' },
     {
       processVersion: 'v22.12.0',
-      ensureNpxAvailable: async () => {},
-      learnHelpCommands: async () => {},
       realUserDataDir: '/real-profile',
       fallbackUserDataDir: '/fallback-profile',
       tryResolveLiveBrowser: async () => null,
@@ -429,7 +477,12 @@ test('launches fallback Chrome even when profile sync fails', async () => {
       waitForBrowserReady: async () => ({
         browserUrl: 'http://127.0.0.1:9555',
       }),
-      startCli: async () => {},
+      resolveChromeDevtoolsCliRunner: async () => ({
+        helpInfo: { startHelp: '' },
+        startCli: async () => ({ stdout: '', stderr: '' }),
+        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
+        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
+      }),
     },
   );
 

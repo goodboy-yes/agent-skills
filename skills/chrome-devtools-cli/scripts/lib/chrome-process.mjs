@@ -108,10 +108,47 @@ export async function waitForDevToolsActivePort(userDataDir, timeoutMs = 15000) 
   );
 }
 
-// 等待浏览器完全就绪：先等待 DevToolsActivePort 文件出现，再探测调试端口可用
-export async function waitForBrowserReady(userDataDir, timeoutMs = 15000) {
-  // 先等待 DevToolsActivePort 文件写入完成
-  const activePort = await waitForDevToolsActivePort(userDataDir, timeoutMs);
-  // 再通过 HTTP 探测确认调试端口可正常访问
-  return await probeBrowserUrl(activePort.browserUrl, timeoutMs);
+async function waitForBrowserUrl(
+  browserUrl,
+  timeoutMs = 15000,
+  {
+    probeBrowserUrlFn = probeBrowserUrl,
+  } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+
+  while (Date.now() < deadline) {
+    try {
+      return await probeBrowserUrlFn(browserUrl, Math.max(1, deadline - Date.now()));
+    } catch (error) {
+      lastError = error;
+      await delay(250);
+    }
+  }
+
+  throw new Error(
+    `Timed out waiting for browser URL: ${browserUrl}${lastError ? `; last error: ${lastError.message}` : ''}`,
+  );
+}
+
+// 等待浏览器完全就绪：如果已知 browserUrl，直接轮询探测；否则等待 DevToolsActivePort 再探测
+export async function waitForBrowserReady(
+  userDataDir,
+  timeoutMs = 15000,
+  {
+    browserUrl,
+    waitForDevToolsActivePortFn = waitForDevToolsActivePort,
+    probeBrowserUrlFn = probeBrowserUrl,
+  } = {},
+) {
+  if (browserUrl) {
+    return await waitForBrowserUrl(browserUrl, timeoutMs, {
+      probeBrowserUrlFn,
+    });
+  }
+
+  const activePort = await waitForDevToolsActivePortFn(userDataDir, timeoutMs);
+
+  return await probeBrowserUrlFn(activePort.browserUrl, timeoutMs);
 }

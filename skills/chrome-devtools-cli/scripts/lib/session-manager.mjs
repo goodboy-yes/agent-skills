@@ -544,74 +544,51 @@ export async function ensureBrowserSession(
   // 检查 Node.js 版本是否满足最低要求
   assertSupportedNodeVersion(deps.processVersion ?? process.version);
 
-  // 判断是否使用旧版 CLI 流程（通过 deps 注入的旧接口）
-  const useLegacyCliFlow =
-    Boolean(deps.ensureNpxAvailable) ||
-    Boolean(deps.learnHelpCommands) ||
-    Boolean(deps.startCli) ||
-    Boolean(deps.startCliWithWsEndpoint) ||
-    Boolean(deps.startCliAutoConnect);
-  const ensureNpxAvailable = deps.ensureNpxAvailable ?? defaultEnsureNpxAvailable;
-  const learnHelpCommands = deps.learnHelpCommands;
   const tryResolveLiveBrowser = deps.tryResolveLiveBrowser ?? defaultTryResolveLiveBrowser;
-  let startCli;
-  let startCliWithWsEndpoint;
-  let startCliAutoConnect;
-  let helpInfo;
 
-  if (useLegacyCliFlow) {
-    // 旧版流程：直接使用注入的函数
-    startCli = deps.startCli ?? (async () => { });
-    startCliWithWsEndpoint = deps.startCliWithWsEndpoint ?? (async () => { });
-    startCliAutoConnect = deps.startCliAutoConnect ?? (async () => { });
-    await ensureNpxAvailable();
-    helpInfo = (await learnHelpCommands?.()) ?? {};
-  } else {
-    // 新版流程：通过 resolveChromeDevtoolsCliRunner 获取 CLI 运行器
-    const cliRunner = await (deps.resolveChromeDevtoolsCliRunner ?? resolveChromeDevtoolsCliRunner)(
-      {
-        localCliCommand: process.env.CHROME_DEVTOOLS_CLI_COMMAND,
-        npmRegistry,
-      },
-      deps,
-    );
+  // 通过 resolveChromeDevtoolsCliRunner 获取 CLI 运行器
+  const cliRunner = await (deps.resolveChromeDevtoolsCliRunner ?? resolveChromeDevtoolsCliRunner)(
+    {
+      localCliCommand: process.env.CHROME_DEVTOOLS_CLI_COMMAND,
+      npmRegistry,
+    },
+    deps,
+  );
 
-    // 包装 startCli 方法，返回包含模式信息的结果
-    startCli = async browserUrl => {
-      const result = await cliRunner.startCli(browserUrl);
+  // 包装 CLI 运行器方法，统一返回包含模式信息的结果
+  const startCli = async browserUrl => {
+    const result = await cliRunner.startCli(browserUrl);
 
-      return {
-        mode: 'browserUrl',
-        browserUrl,
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-      };
+    return {
+      mode: 'browserUrl',
+      browserUrl,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
     };
+  };
 
-    // 包装 startCliWithWsEndpoint 方法
-    startCliWithWsEndpoint = async wsEndpoint => {
-      const result = await cliRunner.startCliWithWsEndpoint(wsEndpoint);
+  const startCliWithWsEndpoint = async wsEndpoint => {
+    const result = await cliRunner.startCliWithWsEndpoint(wsEndpoint);
 
-      return {
-        mode: 'wsEndpoint',
-        webSocketDebuggerUrl: wsEndpoint,
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-      };
+    return {
+      mode: 'wsEndpoint',
+      webSocketDebuggerUrl: wsEndpoint,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
     };
+  };
 
-    // 包装 startCliAutoConnect 方法
-    startCliAutoConnect = async () => {
-      const result = await cliRunner.startCliAutoConnect();
+  const startCliAutoConnect = async () => {
+    const result = await cliRunner.startCliAutoConnect();
 
-      return {
-        mode: 'autoConnect',
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-      };
+    return {
+      mode: 'autoConnect',
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
     };
-    helpInfo = cliRunner.helpInfo ?? {};
-  }
+  };
+
+  const helpInfo = cliRunner.helpInfo ?? {};
 
   // 优先级 1：如果 CLI 支持 --autoConnect，直接尝试自动连接运行中的浏览器
   if (supportsStartAutoConnect(helpInfo.startHelp)) {
@@ -712,7 +689,9 @@ export async function ensureBrowserSession(
 
   // 等待浏览器就绪（DevToolsActivePort 文件出现且调试端口可访问）
   const ready =
-    (await (deps.waitForBrowserReady ?? waitForBrowserReady)(fallbackUserDataDir)) ?? {
+    (await (deps.waitForBrowserReady ?? waitForBrowserReady)(fallbackUserDataDir, undefined, {
+      browserUrl: `http://127.0.0.1:${port}`,
+    })) ?? {
       browserUrl: `http://127.0.0.1:${port}`,
     };
 
