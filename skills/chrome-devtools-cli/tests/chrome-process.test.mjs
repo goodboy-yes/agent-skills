@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { waitForBrowserReady } from '../scripts/lib/chrome-process.mjs';
+import {
+  hasRunningChromeProcess,
+  waitForBrowserReady,
+} from '../scripts/lib/chrome-process.mjs';
+
+test('hasRunningChromeProcess recognizes Chrome processes from process listings', () => {
+  assert.equal(hasRunningChromeProcess('"chrome.exe","1234","Console","1","250,000 K"'), true);
+  assert.equal(hasRunningChromeProcess('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), true);
+  assert.equal(hasRunningChromeProcess('Code.exe\nnode\npwsh'), false);
+});
 
 test('waitForBrowserReady falls back to probing a known browserUrl when DevToolsActivePort is missing', async () => {
   const probeCalls = [];
 
   const ready = await waitForBrowserReady(
-    '/fallback-profile',
+    '/real-profile',
     50,
     {
       browserUrl: 'http://127.0.0.1:9555',

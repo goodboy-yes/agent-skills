@@ -16,19 +16,6 @@ export function normalizeChannel(channel = 'stable') {
   return normalized;
 }
 
-// 获取 CLI 工具使用的备用（fallback）配置文件目录，位于 ~/.cache 下
-export function getFallbackProfileDir({
-  homeDir = os.homedir(),
-  channel = 'stable',
-} = {}) {
-  const normalized = normalizeChannel(channel);
-  // stable 渠道使用 chrome-profile，其他渠道带渠道后缀
-  const profileDirName =
-    normalized === 'stable' ? 'chrome-profile' : `chrome-profile-${normalized}`;
-
-  return path.join(homeDir, '.cache', 'chrome-devtools-mcp-cli', profileDirName);
-}
-
 // 获取 Chrome 真实的用户数据目录（User Data），根据平台和渠道返回不同路径
 export function getRealUserDataDir({
   platform = process.platform,

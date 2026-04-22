@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   assertSupportedNodeVersion,
+  findSupportedNodeExecutableFromNvm,
   isSupportedNodeVersion,
   parseNodeVersion,
 } from '../scripts/lib/node-version.mjs';
@@ -31,4 +32,51 @@ test('assertSupportedNodeVersion throws a clear error for unsupported versions',
     () => assertSupportedNodeVersion('v18.20.0'),
     /chrome-devtools-mcp requires Node \^20\.19\.0 \|\| \^22\.12\.0 \|\| >=23/,
   );
+});
+
+test('findSupportedNodeExecutableFromNvm picks the highest supported Windows version', async () => {
+  const entries = [
+    { name: 'v18.20.0', isDirectory: () => true },
+    { name: 'v20.19.1', isDirectory: () => true },
+    { name: 'v22.17.1', isDirectory: () => true },
+  ];
+  const checkedPaths = [];
+
+  const result = await findSupportedNodeExecutableFromNvm({
+    platform: 'win32',
+    homeDir: 'C:\\Users\\demo',
+    nvmHome: 'C:\\Users\\demo\\AppData\\Roaming\\nvm',
+    readdirFn: async directory => {
+      assert.equal(directory, 'C:\\Users\\demo\\AppData\\Roaming\\nvm');
+      return entries;
+    },
+    accessFn: async candidatePath => {
+      checkedPaths.push(candidatePath);
+      if (candidatePath.endsWith('v22.17.1\\node.exe')) {
+        return;
+      }
+
+      throw new Error('missing node binary');
+    },
+  });
+
+  assert.equal(result, 'C:\\Users\\demo\\AppData\\Roaming\\nvm\\v22.17.1\\node.exe');
+  assert.deepEqual(checkedPaths, ['C:\\Users\\demo\\AppData\\Roaming\\nvm\\v22.17.1\\node.exe']);
+});
+
+test('findSupportedNodeExecutableFromNvm returns null when no supported version is installed', async () => {
+  const result = await findSupportedNodeExecutableFromNvm({
+    platform: 'win32',
+    homeDir: 'C:\\Users\\demo',
+    nvmHome: 'C:\\Users\\demo\\AppData\\Roaming\\nvm',
+    readdirFn: async () => [
+      { name: 'v18.20.0', isDirectory: () => true },
+      { name: 'alias', isDirectory: () => true },
+    ],
+    accessFn: async () => {
+      throw new Error('missing node binary');
+    },
+  });
+
+  assert.equal(result, null);
 });

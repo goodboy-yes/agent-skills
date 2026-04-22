@@ -291,7 +291,44 @@ test('tryResolveLiveBrowserFromUserDataDir falls back to wsEndpoint when HTTP di
   });
 });
 
-test('ensureBrowserSession uses wsEndpoint when live Chrome does not expose /json/version', async () => {
+test('ensureBrowserSession uses autoConnect when Chrome is already running and the CLI supports it', async () => {
+  const autoConnectModes = [];
+
+  const result = await ensureBrowserSession(
+    { channel: 'stable' },
+    {
+      processVersion: 'v22.12.0',
+      realUserDataDir: '/real-profile',
+      isChromeRunning: async () => true,
+      tryResolveLiveBrowser: async () => null,
+      findChromeExecutable: async () => {
+        throw new Error('Chrome should not be launched when autoConnect works');
+      },
+      resolveChromeDevtoolsCliRunner: async () => ({
+        helpInfo: {
+          rootPackageHelp: '--autoConnect',
+          startHelp: '',
+        },
+        startCli: async () => {
+          throw new Error('browserUrl transport should not be used');
+        },
+        startCliWithWsEndpoint: async () => {
+          throw new Error('wsEndpoint transport should not be used');
+        },
+        startCliAutoConnect: async mode => {
+          autoConnectModes.push(mode);
+          return { stdout: '', stderr: '' };
+        },
+      }),
+    },
+  );
+
+  assert.deepEqual(autoConnectModes, ['root']);
+  assert.equal(result.mode, 'reuse-running');
+  assert.equal(result.transport, 'autoConnect');
+});
+
+test('ensureBrowserSession uses wsEndpoint when a running Chrome does not expose /json/version', async () => {
   const wsEndpoints = [];
 
   const result = await ensureBrowserSession(
@@ -299,29 +336,19 @@ test('ensureBrowserSession uses wsEndpoint when live Chrome does not expose /jso
     {
       processVersion: 'v22.12.0',
       realUserDataDir: '/real-profile',
-      fallbackUserDataDir: '/fallback-profile',
-      tryResolveLiveBrowser: async userDataDir =>
-        userDataDir === '/real-profile'
-          ? {
-            browserUrl: 'http://127.0.0.1:9222',
-            webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/demo',
-            transport: 'wsEndpoint',
-          }
-          : null,
-      syncProfileCopy: async () => {
-        throw new Error('sync should not be used');
-      },
-      findChromeExecutable: async () => '/path/to/chrome',
-      findFreePort: async () => 9333,
-      launchChromeDetached: async () => {
-        throw new Error('fallback Chrome should not be launched');
-      },
-      waitForBrowserReady: async () => {
-        throw new Error('fallback readiness should not be awaited');
+      isChromeRunning: async () => true,
+      tryResolveLiveBrowser: async () => ({
+        browserUrl: 'http://127.0.0.1:9222',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/demo',
+        transport: 'wsEndpoint',
+      }),
+      findChromeExecutable: async () => {
+        throw new Error('Chrome should not be launched when a live session exists');
       },
       resolveChromeDevtoolsCliRunner: async () => ({
         helpInfo: {
-          startHelp: 'chrome-devtools start --wsEndpoint',
+          rootPackageHelp: '',
+          startHelp: '--wsEndpoint',
         },
         startCli: async () => {
           throw new Error('browserUrl transport should not be used');
@@ -341,152 +368,146 @@ test('ensureBrowserSession uses wsEndpoint when live Chrome does not expose /jso
   assert.equal(result.mode, 'reuse-running');
   assert.equal(result.transport, 'wsEndpoint');
   assert.equal(result.browserUrl, 'http://127.0.0.1:9222');
-  assert.equal(result.webSocketDebuggerUrl, 'ws://127.0.0.1:9222/devtools/browser/demo');
 });
 
-test('reuses a running real Chrome first', async () => {
-  const execCalls = [];
+test('ensureBrowserSession falls back to browserUrl when autoConnect fails but a running Chrome exposes a debugging port', async () => {
+  const browserUrls = [];
+  let autoConnectCalls = 0;
+
   const result = await ensureBrowserSession(
     { channel: 'stable' },
     {
       processVersion: 'v22.12.0',
       realUserDataDir: '/real-profile',
-      fallbackUserDataDir: '/fallback-profile',
-      tryResolveLiveBrowser: async userDataDir =>
-        userDataDir === '/real-profile'
-          ? { browserUrl: 'http://127.0.0.1:9222', source: 'real' }
-          : null,
-      syncProfileCopy: async () => {
-        throw new Error('sync should not be used');
-      },
-      findChromeExecutable: async () => '/path/to/chrome',
-      findFreePort: async () => 9333,
-      launchChromeDetached: async () => {
-        throw new Error('fallback Chrome should not be launched');
-      },
-      waitForBrowserReady: async () => {
-        throw new Error('fallback readiness should not be awaited');
+      isChromeRunning: async () => true,
+      tryResolveLiveBrowser: async () => ({
+        browserUrl: 'http://127.0.0.1:9222',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/demo',
+        transport: 'browserUrl',
+      }),
+      findChromeExecutable: async () => {
+        throw new Error('Chrome should not be launched when a live session exists');
       },
       resolveChromeDevtoolsCliRunner: async () => ({
-        helpInfo: { startHelp: '' },
+        helpInfo: {
+          rootPackageHelp: '--autoConnect',
+          startHelp: '',
+        },
         startCli: async browserUrl => {
-          execCalls.push(browserUrl);
+          browserUrls.push(browserUrl);
           return { stdout: '', stderr: '' };
         },
-        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
-        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
+        startCliWithWsEndpoint: async () => {
+          throw new Error('wsEndpoint transport should not be used');
+        },
+        startCliAutoConnect: async () => {
+          autoConnectCalls += 1;
+          throw new Error('autoConnect not enabled in Chrome');
+        },
       }),
     },
   );
 
+  assert.equal(autoConnectCalls, 1);
+  assert.deepEqual(browserUrls, ['http://127.0.0.1:9222']);
   assert.equal(result.mode, 'reuse-running');
-  assert.deepEqual(execCalls, ['http://127.0.0.1:9222']);
+  assert.equal(result.transport, 'browserUrl');
 });
 
-test('reuses an existing fallback Chrome before launching a new one', async () => {
-  const result = await ensureBrowserSession(
-    { channel: 'stable' },
-    {
-      processVersion: 'v22.12.0',
-      realUserDataDir: '/real-profile',
-      fallbackUserDataDir: '/fallback-profile',
-      tryResolveLiveBrowser: async userDataDir =>
-        userDataDir === '/fallback-profile'
-          ? { browserUrl: 'http://127.0.0.1:9444', source: 'fallback' }
-          : null,
-      syncProfileCopy: async () => ({ ok: true }),
-      findChromeExecutable: async () => '/path/to/chrome',
-      findFreePort: async () => 9333,
-      launchChromeDetached: async () => {
-        throw new Error('fallback Chrome should not be launched again');
-      },
-      waitForBrowserReady: async () => {
-        throw new Error('fallback readiness should not be awaited');
-      },
-      resolveChromeDevtoolsCliRunner: async () => ({
-        helpInfo: { startHelp: '' },
-        startCli: async () => ({ stdout: '', stderr: '' }),
-        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
-        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
-      }),
-    },
+test('ensureBrowserSession exits with guidance when Chrome is already running but cannot be reused', async () => {
+  await assert.rejects(
+    () =>
+      ensureBrowserSession(
+        { channel: 'stable' },
+        {
+          processVersion: 'v22.12.0',
+          realUserDataDir: 'C:\\Users\\demo\\AppData\\Local\\Google\\Chrome\\User Data',
+          isChromeRunning: async () => true,
+          tryResolveLiveBrowser: async () => null,
+          findChromeExecutable: async () => {
+            throw new Error('Chrome should not be launched while the profile is already in use');
+          },
+          resolveChromeDevtoolsCliRunner: async () => ({
+            helpInfo: {
+              rootPackageHelp: '--autoConnect',
+              startHelp: '',
+            },
+            startCli: async () => {
+              throw new Error('browserUrl transport should not be used');
+            },
+            startCliWithWsEndpoint: async () => {
+              throw new Error('wsEndpoint transport should not be used');
+            },
+            startCliAutoConnect: async () => {
+              throw new Error('autoConnect not enabled');
+            },
+          }),
+        },
+      ),
+    /chrome:\/\/inspect\/#remote-debugging[\s\S]*完全退出当前 Chrome 再重试/i,
   );
-
-  assert.equal(result.mode, 'reuse-fallback');
-  assert.equal(result.browserUrl, 'http://127.0.0.1:9444');
 });
 
-test('passes launched browserUrl to waitForBrowserReady when launching fallback Chrome', async () => {
-  let waitCall;
+test('ensureBrowserSession launches Chrome with the real profile when Chrome is not already running', async () => {
+  let launchedWith;
+  let waitedWith;
+  const browserUrls = [];
 
   const result = await ensureBrowserSession(
     { channel: 'stable' },
     {
       processVersion: 'v22.12.0',
       realUserDataDir: '/real-profile',
-      fallbackUserDataDir: '/fallback-profile',
+      chromeExecutablePath: '/path/to/chrome',
+      isChromeRunning: async () => false,
       tryResolveLiveBrowser: async () => null,
-      syncProfileCopy: async () => ({ ok: true }),
-      findChromeExecutable: async () => '/path/to/chrome',
+      findChromeExecutable: async () => {
+        throw new Error('findChromeExecutable should not be called when an explicit executable is provided');
+      },
       findFreePort: async () => 9555,
-      launchChromeDetached: async () => {},
+      launchChromeDetached: async options => {
+        launchedWith = options;
+      },
       waitForBrowserReady: async (userDataDir, timeoutMs, options) => {
-        waitCall = { userDataDir, timeoutMs, options };
-        assert.equal(userDataDir, '/fallback-profile');
-        assert.equal(options?.browserUrl, 'http://127.0.0.1:9555');
-
+        waitedWith = { userDataDir, timeoutMs, options };
         return {
           browserUrl: options.browserUrl,
+          webSocketDebuggerUrl: 'ws://127.0.0.1:9555/devtools/browser/demo',
         };
       },
       resolveChromeDevtoolsCliRunner: async () => ({
-        helpInfo: { startHelp: '' },
-        startCli: async () => ({ stdout: '', stderr: '' }),
-        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
-        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
+        helpInfo: {
+          rootPackageHelp: '',
+          startHelp: '',
+        },
+        startCli: async browserUrl => {
+          browserUrls.push(browserUrl);
+          return { stdout: '', stderr: '' };
+        },
+        startCliWithWsEndpoint: async () => {
+          throw new Error('wsEndpoint transport should not be used');
+        },
+        startCliAutoConnect: async () => {
+          throw new Error('autoConnect transport should not be used');
+        },
       }),
     },
   );
 
-  assert.deepEqual(waitCall, {
-    userDataDir: '/fallback-profile',
+  assert.deepEqual(launchedWith, {
+    executablePath: '/path/to/chrome',
+    userDataDir: '/real-profile',
+    port: 9555,
+  });
+  assert.deepEqual(waitedWith, {
+    userDataDir: '/real-profile',
     timeoutMs: undefined,
     options: {
       browserUrl: 'http://127.0.0.1:9555',
     },
   });
-  assert.equal(result.mode, 'launched-fallback');
-  assert.equal(result.browserUrl, 'http://127.0.0.1:9555');
-});
-
-test('launches fallback Chrome even when profile sync fails', async () => {
-  let launched = false;
-  const result = await ensureBrowserSession(
-    { channel: 'stable' },
-    {
-      processVersion: 'v22.12.0',
-      realUserDataDir: '/real-profile',
-      fallbackUserDataDir: '/fallback-profile',
-      tryResolveLiveBrowser: async () => null,
-      syncProfileCopy: async () => ({ ok: false, error: 'busy profile' }),
-      findChromeExecutable: async () => '/path/to/chrome',
-      findFreePort: async () => 9555,
-      launchChromeDetached: async () => {
-        launched = true;
-      },
-      waitForBrowserReady: async () => ({
-        browserUrl: 'http://127.0.0.1:9555',
-      }),
-      resolveChromeDevtoolsCliRunner: async () => ({
-        helpInfo: { startHelp: '' },
-        startCli: async () => ({ stdout: '', stderr: '' }),
-        startCliWithWsEndpoint: async () => ({ stdout: '', stderr: '' }),
-        startCliAutoConnect: async () => ({ stdout: '', stderr: '' }),
-      }),
-    },
-  );
-
-  assert.equal(launched, true);
-  assert.equal(result.mode, 'launched-fallback');
-  assert.equal(result.syncStatus, 'failed');
+  assert.deepEqual(browserUrls, ['http://127.0.0.1:9555']);
+  assert.equal(result.mode, 'launched-real-profile');
+  assert.equal(result.userDataDir, '/real-profile');
+  assert.equal(result.transport, 'browserUrl');
 });

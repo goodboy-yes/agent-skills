@@ -1,14 +1,49 @@
+import { execFile } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
+import process from 'node:process';
+import { promisify } from 'node:util';
 
 import { readDevToolsActivePort } from './devtools-active-port.mjs';
 import { probeBrowserUrl } from './http-probe.mjs';
 
+const execFileAsync = promisify(execFile);
+
 // 延时工具函数，用于轮询等待
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function defaultListChromeProcesses({ platform = process.platform } = {}) {
+  if (platform === 'win32') {
+    const result = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq chrome.exe', '/FO', 'CSV', '/NH'], {
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  }
+
+  const result = await execFileAsync('ps', ['-ax', '-o', 'comm='], {
+    windowsHide: true,
+    maxBuffer: 1024 * 1024,
+  });
+  return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+}
+
+export function hasRunningChromeProcess(processListText = '') {
+  return /\b(chrome(?:\.exe)?|google-chrome|chromium)\b/i.test(processListText);
+}
+
+export async function isChromeRunning(
+  {
+    platform = process.platform,
+    listChromeProcesses = defaultListChromeProcesses,
+  } = {},
+) {
+  const processListText = await listChromeProcesses({ platform });
+  return hasRunningChromeProcess(processListText);
 }
 
 // 从候选路径列表中查找第一个存在的 Chrome 可执行文件

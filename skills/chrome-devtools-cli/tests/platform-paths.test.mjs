@@ -4,27 +4,12 @@ import path from 'node:path';
 
 import {
   getChromeExecutableCandidates,
-  getFallbackProfileDir,
   getRealUserDataDir,
   normalizeChannel,
 } from '../scripts/lib/platform-paths.mjs';
 
 test('normalizeChannel defaults to stable', () => {
   assert.equal(normalizeChannel(), 'stable');
-});
-
-test('getFallbackProfileDir uses chrome-profile for stable', () => {
-  assert.equal(
-    getFallbackProfileDir({ homeDir: '/Users/demo', channel: 'stable' }),
-    path.join('/Users/demo', '.cache', 'chrome-devtools-mcp-cli', 'chrome-profile'),
-  );
-});
-
-test('getFallbackProfileDir uses a channel suffix for beta', () => {
-  assert.equal(
-    getFallbackProfileDir({ homeDir: '/Users/demo', channel: 'beta' }),
-    path.join('/Users/demo', '.cache', 'chrome-devtools-mcp-cli', 'chrome-profile-beta'),
-  );
 });
 
 test('getRealUserDataDir returns the default Windows stable path', () => {
